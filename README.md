@@ -59,3 +59,8 @@ make build         # bin/: agent (arm64, armv7) and server
 make image         # local server image
 dev/up.sh          # Authelia + Caddy for testing login, see dev/README.md
 ```
+
+## License
+
+[AGPL-3.0](LICENSE). If you run a modified birdcam-server for others, you must offer them
+the source of your changes.
