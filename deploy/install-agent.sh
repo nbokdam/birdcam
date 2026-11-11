@@ -11,7 +11,7 @@ BIN=${BIN:-$DIR/birdcam-agent}
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
 	gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-	gstreamer1.0-plugins-bad gstreamer1.0-alsa
+	gstreamer1.0-plugins-bad gstreamer1.0-alsa alsa-utils
 
 if ! id birdcam-agent >/dev/null 2>&1; then
 	useradd --system --home-dir /var/lib/birdcam-agent --create-home \
