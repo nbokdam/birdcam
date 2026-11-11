@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"birdcam/internal/protocol"
 )
@@ -18,6 +19,14 @@ import (
 type Discovered struct {
 	protocol.Camera
 	Nodes map[string]string `json:"nodes"` // codec -> device node
+
+	// Native H.264 bitrate control via a Sonix UVC extension unit (agent-side
+	// only; not part of the protocol). XUNode/XUUnit say where to send the
+	// ioctls, XUBitrateBps is the value read back when the camera appeared.
+	NativeBitrateControl bool   `json:"native_bitrate_control,omitempty"`
+	XUNode               string `json:"xu_node,omitempty"`
+	XUUnit               uint8  `json:"xu_unit,omitempty"`
+	XUBitrateBps         int    `json:"xu_bitrate_bps,omitempty"`
 }
 
 // Discoverer enumerates cameras. All roots are configurable for tests.
@@ -27,6 +36,18 @@ type Discoverer struct {
 	ProcAsound string // /proc/asound
 	// Query returns the h264/mjpeg capture formats of a device node.
 	Query func(path string) ([]protocol.VideoFormat, error)
+	// ProbeXU checks a camera with H.264 for native bitrate control (nil =
+	// never). node is the by-id path to open, real the resolved /dev/videoN.
+	ProbeXU func(sysRoot, node, real string) (XUProbe, bool)
+
+	probeMu    sync.Mutex
+	probeCache map[string]xuProbeEntry // camera id -> result, kept while the camera stays present
+}
+
+type xuProbeEntry struct {
+	node string
+	res  XUProbe
+	ok   bool
 }
 
 // NewDiscoverer returns a Discoverer using the real system paths.
@@ -36,6 +57,7 @@ func NewDiscoverer() *Discoverer {
 		SysRoot:    "/sys",
 		ProcAsound: "/proc/asound",
 		Query:      EnumCaptureFormats,
+		ProbeXU:    ProbeBitrateXU,
 	}
 }
 
@@ -84,6 +106,8 @@ func (d *Discoverer) Discover() []Discovered {
 	}
 
 	var out []Discovered
+	present := map[string]bool{}
+	defer func() { d.pruneProbes(present) }()
 	for prefix, nodes := range groups {
 		sort.Slice(nodes, func(i, j int) bool { return nodes[i].index < nodes[j].index })
 		cam := Discovered{
@@ -128,10 +152,47 @@ func (d *Discoverer) Discover() []Discovered {
 			cam.Name = n
 		}
 		cam.AudioDevice = d.FindALSA(firstReal)
+		present[cam.ID] = true
+		if cam.Nodes["h264"] != "" {
+			if p, ok := d.probe(cam.ID, firstNode, firstReal); ok {
+				cam.NativeBitrateControl = true
+				cam.XUNode, cam.XUUnit, cam.XUBitrateBps = p.Node, p.Unit, p.BitrateBps
+			}
+		}
 		out = append(out, cam)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// probe runs ProbeXU once per camera appearance and caches the result (also a
+// negative one), so the 10 s rescan does not poke the camera again.
+func (d *Discoverer) probe(id, node, real string) (XUProbe, bool) {
+	if d.ProbeXU == nil {
+		return XUProbe{}, false
+	}
+	d.probeMu.Lock()
+	defer d.probeMu.Unlock()
+	if e, ok := d.probeCache[id]; ok && e.node == node {
+		return e.res, e.ok
+	}
+	res, ok := d.ProbeXU(d.SysRoot, node, real)
+	if d.probeCache == nil {
+		d.probeCache = map[string]xuProbeEntry{}
+	}
+	d.probeCache[id] = xuProbeEntry{node: node, res: res, ok: ok}
+	return res, ok
+}
+
+// pruneProbes forgets cameras that vanished, so a replug is probed again.
+func (d *Discoverer) pruneProbes(present map[string]bool) {
+	d.probeMu.Lock()
+	defer d.probeMu.Unlock()
+	for id := range d.probeCache {
+		if !present[id] {
+			delete(d.probeCache, id)
+		}
+	}
 }
 
 // prefixName makes a fallback display name from a by-id prefix.
@@ -201,6 +262,9 @@ func ApplyOverrides(cams []Discovered, cfg map[string]CameraConfig) []Discovered
 				c.Name = oc.Name
 			}
 			c.Rotation = oc.Rotation
+			if oc.NativeBitrateControl != nil && !*oc.NativeBitrateControl {
+				c.NativeBitrateControl = false
+			}
 			switch oc.AudioDevice {
 			case "":
 			case "none":

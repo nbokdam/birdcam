@@ -27,5 +27,8 @@ cameras: {}
 #    audio_device: hw:CARD=Camera,DEV=0   # or "none" to disable audio
 #    preferred_mode: h264-passthrough     # or mjpeg-hwenc
 #    native_kbps: 7000                    # bitrate of the camera's built-in H.264 encoder
+                                         # (default: measured, or 7000 without bitrate control)
+    native_bitrate_control: true         # Sonix cameras: set the H.264 bitrate natively (UVC
+                                         # extension unit) to fit the upload budget; false disables
 #    rotation: 0                          # clockwise display rotation: 0, 90, 180 or 270
 #                                         # (metadata for viewers; video is not rotated; restart to apply)

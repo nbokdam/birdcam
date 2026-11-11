@@ -33,6 +33,9 @@ type Plan struct {
 	// IngestCertSHA256, if set, makes the ingest connection TLS, pinned to
 	// this lowercase hex SHA-256 of the server's leaf certificate (DER).
 	IngestCertSHA256 string
+	// Prepare, if set, runs before every attempt (e.g. to re-apply a camera
+	// bitrate that a replug reset). An error fails that attempt.
+	Prepare func() error
 }
 
 // SupervisorConfig configures a Supervisor. Zero values get defaults.
@@ -273,6 +276,11 @@ func (se *session) runOnce(ctx context.Context) (time.Duration, error) {
 	t0 := time.Now()
 	st := se.plan.Start
 
+	if se.plan.Prepare != nil {
+		if err := se.plan.Prepare(); err != nil {
+			return time.Since(t0), fmt.Errorf("prepare: %w", err)
+		}
+	}
 	conn, err := dialIngest(ctx, cfg.ServerHost, st.Port, cfg.DialTimeout, se.plan.IngestCertSHA256)
 	if err != nil {
 		return time.Since(t0), fmt.Errorf("connect ingest: %w", err)

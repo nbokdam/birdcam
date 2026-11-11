@@ -34,7 +34,10 @@ type CameraConfig struct {
 	AudioDevice   string `yaml:"audio_device"`   // override ALSA device ("none" disables audio)
 	PreferredMode string `yaml:"preferred_mode"` // "h264-passthrough" | "mjpeg-hwenc"
 	NativeKbps    int    `yaml:"native_kbps"`    // bitrate of the camera's own H.264 encoder
-	Rotation      int    `yaml:"rotation"`       // clockwise display rotation: 0, 90, 180, 270 (metadata only)
+	// NativeBitrateControl set to false disables the use of the camera's
+	// native H.264 bitrate control (UVC extension unit); default: use it if detected.
+	NativeBitrateControl *bool `yaml:"native_bitrate_control"`
+	Rotation             int   `yaml:"rotation"` // clockwise display rotation: 0, 90, 180, 270 (metadata only)
 }
 
 // LoadConfig reads and validates a config file.
@@ -108,4 +111,12 @@ func (c *Config) NativeKbps(cameraID string) int {
 		return cc.NativeKbps
 	}
 	return DefaultNativeKbps
+}
+
+// ConfiguredNativeKbps returns native_kbps for a camera, 0 if not configured.
+func (c *Config) ConfiguredNativeKbps(cameraID string) int {
+	if cc, ok := c.Cameras[cameraID]; ok {
+		return max(cc.NativeKbps, 0)
+	}
+	return 0
 }

@@ -291,27 +291,46 @@ XUs**, the ones driven by Sonix's `H264_UVC_TestAP` (`sonix_xu_ctrls.c`), which 
 cameras also use. Their selector layout fits the USR unit: sel 2 = H264_CTRL, 3 = MJPG_CTRL,
 4 = OSD, 5 = MOTION_DETECTION (24 bytes), 6 = IMG_SETTING, 8 = GPIO.
 
-In TestAP, bitrate is changed through USR selector 2 with a two-step "select sub-command,
-then read or write" protocol:
+The bitrate is changed through USR selector 2 (length 11, from GET_LEN) with a two-step
+"select sub-command, then read or write" protocol (via `tools/uvcxu.py`, or natively in
+`internal/agent/xu.go`):
 
 ```
-# NOT VERIFIED on this camera. Recalled from the Sonix TestAP source.
 uvcxu.py DEV set 4 2 9a02            # select sub-command 0x02 = H.264 bitrate
 uvcxu.py DEV get 4 2                 # read: bytes[0..2] = bitrate (bit/s), big-endian 24-bit
-uvcxu.py DEV set 4 2 0f4240          # write 1 000 000 bit/s (0x0F4240), RAM only
-# 9a01 = rate-control mode (CBR/VBR), other 9aXX = GOP/QP etc.
+uvcxu.py DEV set 4 2 9a02            # write: select again ...
+uvcxu.py DEV set 4 2 0f4240          # ... then 1 000 000 bit/s (0x0F4240), RAM only
 ```
 
-**Status: not tested.** Running the SET_CUR sub-command selector (even the read-back
-sequence starts with a SET) was blocked by this session's permission policy, so I only did
-the read-only GET_* queries. Points to know before trying it:
-- The SYS unit (3) has flash and ASIC read/write commands in the Sonix firmware. **Never SET on unit 3.**
-- The USR H264_CTRL sub-commands are documented by Sonix as runtime-only (RAM). To try:
-  stream the H.264 node, run the three commands above with the agreed bitrate, and watch
-  `rtpstat.py` kbps. The value is lost on replug, so the agent would have to apply it
-  before every `start`, while the device is open but before STREAMON, or right after.
-- If it works, the agent can apply `max_kbps` to passthrough mode. Until then, assume the
-  camera **always sends about 6.5 Mbit/s** and use `mjpeg-hwenc` when `max_kbps` < about 7000.
+**Status: verified** on 32e4:9422 (unit 4, USR XU). The default reads back as `0x632ea0` =
+6 500 000 bit/s. A write takes effect immediately, even while streaming, and is lost on
+replug or power cycle. Measured uplink (video + audio + TLS):
+
+| Camera bitrate | Uplink |
+|---|---|
+| 2.0 Mbit/s | 2.24 Mbit/s |
+| 1.0 Mbit/s | 1.24 Mbit/s |
+
+So the non-video overhead is about 240 kbit/s, roughly constant; the agent subtracts 240 kbps
+(60 kbps without audio) from the budget, never going below half the budget.
+
+**Safety:** the SYS unit (3) has flash and ASIC read/write commands in the Sonix firmware.
+**Never SET on unit 3.** The agent finds the USR unit by GUID in the USB descriptors and a
+single function (`xuSetCur`) refuses anything but selector 2 with `9a 02` or a bitrate value.
+
+How the agent uses it:
+- Discovery reads the bitrate once per camera appearance; the camera counts as controllable
+  if the USR XU is present and the read-back is plausible (100 kbit/s to 16.7 Mbit/s).
+  Without `native_kbps` configured the measured value is the native bitrate.
+- Passthrough is offered at any budget >= 300 kbps (preferred over `mjpeg-hwenc`); the
+  resolution is lowered like for hwenc (<= 1000 kbps: 640x480, <= 2500 kbps: 1280x720).
+  With an unlimited budget the camera is still explicitly set to its native bitrate, since
+  an earlier session may have lowered it.
+- The bitrate is applied before every start attempt (replug resets it) and the read-back is
+  logged. If applying fails the agent falls back to `mjpeg-hwenc` (or the native rate if
+  the budget is unlimited).
+- `native_bitrate_control: false` in the camera's config disables all of this.
+- Debug: `birdcam-agent -xu-bitrate <camera-id>` prints the unit and current bitrate.
 
 ## 7. Recommendations for the Go agent (supervisor)
 

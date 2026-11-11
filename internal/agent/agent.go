@@ -25,6 +25,8 @@ type Agent struct {
 	client *Client
 	sendFn func(string, any) error // test hook; defaults to client.Send
 	sup    *Supervisor
+	// applyBitrate sets the camera's native H.264 bitrate (test hook).
+	applyBitrate func(node string, unit uint8, bps int) (int, error)
 
 	mu      sync.Mutex
 	cameras []Discovered
@@ -35,6 +37,8 @@ func New(cfg *Config, version string, log *slog.Logger) *Agent {
 		cfg: cfg, version: version, log: log,
 		disc: NewDiscoverer(),
 		hw:   DetectHardware("/sys", "/proc/device-tree/model", cfg.MaxUploadKbps),
+
+		applyBitrate: ApplyBitrate,
 	}
 	a.client = &Client{
 		URL:     cfg.ServerURL,
@@ -154,11 +158,32 @@ func (a *Agent) OnStart(s protocol.Start, ingestFP string) {
 		return
 	}
 	hints := Hints{MaxUploadKbps: a.cfg.MaxUploadKbps, NativeKbps: a.cfg.NativeKbps(cam.ID)}
+	if a.cfg.ConfiguredNativeKbps(cam.ID) == 0 && cam.XUBitrateBps > 0 {
+		hints.NativeKbps = cam.XUBitrateBps / 1000 // measured default of the camera
+	}
+	hints.NativeBitrateControl = cam.NativeBitrateControl
 	hints.PreferredMode = a.cfg.Cameras[cam.ID].PreferredMode
 	sel, err := SelectMode(cam, s.Profile, a.hw, hints)
 	if err != nil {
 		fail(err.Error())
 		return
+	}
+	var prepare func() error
+	if sel.CameraBitrateKbps > 0 {
+		apply := func() error { return a.applyCameraBitrate(cam, sel.CameraBitrateKbps) }
+		if err := apply(); err != nil {
+			// Cannot control the camera: fall back to selection without it
+			// (mjpeg-hwenc if the budget needs it, else the native rate).
+			a.log.Warn("native bitrate control failed; falling back", "camera", cam.ID, "err", err)
+			hints.NativeBitrateControl = false
+			sel, err = SelectMode(cam, s.Profile, a.hw, hints)
+			if err != nil {
+				fail(err.Error())
+				return
+			}
+		} else {
+			prepare = apply
+		}
 	}
 	pp := PipelineParams{
 		Mode: sel.Mode, H264Node: cam.Nodes["h264"], MJPEGNode: cam.Nodes["mjpeg"],
@@ -175,7 +200,7 @@ func (a *Agent) OnStart(s protocol.Start, ingestFP string) {
 		fail(err.Error())
 		return
 	}
-	plan := Plan{Start: s, Mode: sel.Mode, Args: args, IngestCertSHA256: ingestFP}
+	plan := Plan{Start: s, Mode: sel.Mode, Args: args, IngestCertSHA256: ingestFP, Prepare: prepare}
 	if sel.Mode == protocol.ModeMJPEGHWEnc && !pp.SWDecode {
 		// The HW JPEG decoder can stall silently on corrupt frames; the
 		// supervisor switches to software decoding if that happens.
@@ -183,7 +208,7 @@ func (a *Agent) OnStart(s protocol.Start, ingestFP string) {
 		plan.FallbackArgs, _ = BuildGstArgs(pp)
 	}
 	a.log.Info("starting stream", "camera", cam.ID, "session", s.SessionID, "mode", sel.Mode,
-		"size", fmt.Sprintf("%dx%d", sel.Width, sel.Height), "fps", sel.FPS, "kbps", sel.BitrateKbps,
+		"size", fmt.Sprintf("%dx%d", sel.Width, sel.Height), "fps", sel.FPS, "kbps", sel.BitrateKbps, "camera_kbps", sel.CameraBitrateKbps,
 		"swdecode", pp.SWDecode && plan.FallbackArgs == nil, "audio", pp.AudioDevice, "audio_rate", pp.AudioRate)
 	a.sup.Start(plan)
 }
@@ -193,3 +218,17 @@ func (a *Agent) OnStop(s protocol.Stop) { a.sup.Stop(s.CameraID, s.SessionID) }
 
 // OnDisconnect implements Handler: stop all pipelines.
 func (a *Agent) OnDisconnect() { a.sup.StopAll() }
+
+// applyCameraBitrate sets the camera's encoder bitrate via the UVC extension
+// unit and logs the read-back value.
+func (a *Agent) applyCameraBitrate(cam Discovered, kbps int) error {
+	if !cam.NativeBitrateControl {
+		return fmt.Errorf("camera %s has no native bitrate control", cam.ID)
+	}
+	got, err := a.applyBitrate(cam.XUNode, cam.XUUnit, kbps*1000)
+	if err != nil {
+		return fmt.Errorf("set camera bitrate to %d kbps: %w", kbps, err)
+	}
+	a.log.Info("camera bitrate applied", "camera", cam.ID, "kbps", kbps, "readback_bps", got)
+	return nil
+}

@@ -15,7 +15,10 @@ type Selection struct {
 	Height      int
 	FPS         int
 	BitrateKbps int // target bitrate for mjpeg-hwenc; 0 for passthrough
-	AudioDevice string
+	// CameraBitrateKbps, if > 0, is the bitrate to set on the camera's own
+	// H.264 encoder (passthrough with native bitrate control) before streaming.
+	CameraBitrateKbps int
+	AudioDevice       string
 }
 
 // Hints are the agent-side inputs of mode selection.
@@ -23,9 +26,56 @@ type Hints struct {
 	MaxUploadKbps int    // config max_upload_kbps, 0 = unlimited
 	NativeKbps    int    // camera's native H.264 bitrate
 	PreferredMode string // optional per-camera preference
+	// NativeBitrateControl: the camera's H.264 bitrate can be set through the
+	// UVC extension unit, so passthrough works at any budget >= MinNativeControlKbps.
+	NativeBitrateControl bool
 }
 
 const defaultHWEncKbps = 2500
+
+const (
+	// MinNativeControlKbps is the lowest upload budget for which passthrough
+	// with a controlled camera bitrate is offered.
+	MinNativeControlKbps = 300
+	// Headroom subtracted from the budget for everything that is not camera
+	// video. Measured on the Sonix camera: 2 Mbit/s video -> 2.24 Mbit/s and
+	// 1 Mbit/s -> 1.24 Mbit/s on the uplink with audio and TLS, i.e. ~240 kbps
+	// constant. Without audio only RTP/TLS overhead (~60 kbps) remains.
+	audioHeadroomKbps   = 240
+	noAudioHeadroomKbps = 60
+)
+
+// CameraBitrateFor returns the camera encoder bitrate (kbps) that fits the
+// budget (0 = unlimited -> native), never above native.
+func CameraBitrateFor(budget, native int, audio bool) int {
+	if budget <= 0 {
+		return native
+	}
+	head := noAudioHeadroomKbps
+	if audio {
+		head = audioHeadroomKbps
+	}
+	return min(native, max(budget-head, budget/2))
+}
+
+// capForBudget lowers the requested resolution for low budgets: the encoders
+// do better at lower resolution when starved of bitrate.
+func capForBudget(budget, w, h int) (int, int) {
+	if budget <= 0 {
+		return w, h
+	}
+	capW, capH := 0, 0
+	switch {
+	case budget <= 1000:
+		capW, capH = 640, 480
+	case budget <= 2500:
+		capW, capH = 1280, 720
+	}
+	if capW > 0 && (w == 0 || h == 0 || w > capW || h > capH) {
+		return capW, capH
+	}
+	return w, h
+}
 
 // Budget combines the profile budget and the agent budget (0 = unlimited).
 func Budget(profileKbps, agentKbps int) int {
@@ -53,14 +103,22 @@ func SelectMode(cam Discovered, req protocol.Profile, hw protocol.Hardware, h Hi
 		audio = cam.AudioDevice
 	}
 
-	passOK := len(h264) > 0 && (budget == 0 || budget >= native)
+	ctl := h.NativeBitrateControl && len(h264) > 0 && (budget == 0 || budget >= MinNativeControlKbps)
+	passOK := len(h264) > 0 && (budget == 0 || budget >= native || ctl)
 	hwOK := len(mjpeg) > 0 && hw.HWH264Encoder && hw.HWMJPEGDecoder
 
 	tryPass := func() Selection {
-		f := nearestFormat(h264, req.Width, req.Height)
+		w, hh := req.Width, req.Height
+		camKbps := 0
+		if ctl {
+			w, hh = capForBudget(budget, w, hh)
+			camKbps = CameraBitrateFor(budget, native, audio != "")
+		}
+		f := nearestFormat(h264, w, hh)
 		return Selection{
 			Mode: protocol.ModeH264Passthrough, Node: cam.Nodes["h264"],
 			Width: f.Width, Height: f.Height, FPS: nearestFPS(f.FPS, req.FPS), AudioDevice: audio,
+			CameraBitrateKbps: camKbps,
 		}
 	}
 	tryHW := func() Selection {
@@ -68,19 +126,7 @@ func SelectMode(cam Discovered, req protocol.Profile, hw protocol.Hardware, h Hi
 		if kbps == 0 {
 			kbps = defaultHWEncKbps
 		}
-		w, hh := req.Width, req.Height
-		if budget > 0 {
-			capW, capH := 0, 0
-			switch {
-			case budget <= 1000:
-				capW, capH = 640, 480
-			case budget <= 2500:
-				capW, capH = 1280, 720
-			}
-			if capW > 0 && (w == 0 || hh == 0 || w > capW || hh > capH) {
-				w, hh = capW, capH
-			}
-		}
+		w, hh := capForBudget(budget, req.Width, req.Height)
 		f := nearestFormat(mjpeg, w, hh)
 		return Selection{
 			Mode: protocol.ModeMJPEGHWEnc, Node: cam.Nodes["mjpeg"],

@@ -97,6 +97,46 @@ func TestSelectMode(t *testing.T) {
 	}
 }
 
+func TestSelectModeNativeControl(t *testing.T) {
+	ctl := Hints{NativeBitrateControl: true, NativeKbps: 6500}
+	tests := []struct {
+		name    string
+		req     protocol.Profile
+		hints   Hints
+		mode    string
+		w, h    int
+		camKbps int
+		kbps    int
+	}{
+		{"unlimited sets default", protocol.Profile{Width: 1920, Height: 1080, FPS: 30}, ctl, protocol.ModeH264Passthrough, 1920, 1080, 6500, 0},
+		{"budget above native", protocol.Profile{Width: 1920, Height: 1080, FPS: 30, MaxKbps: 8000}, ctl, protocol.ModeH264Passthrough, 1920, 1080, 6500, 0},
+		{"budget 4000 audio", protocol.Profile{Width: 1920, Height: 1080, FPS: 30, MaxKbps: 4000, Audio: true}, ctl, protocol.ModeH264Passthrough, 1920, 1080, 3760, 0},
+		{"budget 2000 -> 720p", protocol.Profile{Width: 1920, Height: 1080, FPS: 30, MaxKbps: 2000, Audio: true}, ctl, protocol.ModeH264Passthrough, 1280, 720, 1760, 0},
+		{"budget 1000 -> vga", protocol.Profile{Width: 1280, Height: 720, FPS: 30, MaxKbps: 1000, Audio: true}, ctl, protocol.ModeH264Passthrough, 640, 480, 760, 0},
+		{"budget 1000 no audio", protocol.Profile{Width: 1280, Height: 720, FPS: 30, MaxKbps: 1000}, ctl, protocol.ModeH264Passthrough, 640, 480, 940, 0},
+		{"budget 300 floor", protocol.Profile{Width: 640, Height: 480, FPS: 30, MaxKbps: 300, Audio: true}, ctl, protocol.ModeH264Passthrough, 640, 480, 150, 0},
+		{"budget 250 -> hwenc", protocol.Profile{Width: 640, Height: 480, FPS: 30, MaxKbps: 250}, ctl, protocol.ModeMJPEGHWEnc, 640, 480, 0, 250},
+		{"no control, low budget -> hwenc", protocol.Profile{Width: 1280, Height: 720, FPS: 30, MaxKbps: 2000}, Hints{NativeKbps: 6500}, protocol.ModeMJPEGHWEnc, 1280, 720, 0, 2000},
+		{"preferred hwenc wins", protocol.Profile{Width: 1280, Height: 720, FPS: 30, MaxKbps: 2000}, Hints{NativeBitrateControl: true, PreferredMode: protocol.ModeMJPEGHWEnc}, protocol.ModeMJPEGHWEnc, 1280, 720, 0, 2000},
+		{"preferred passthrough", protocol.Profile{Width: 1280, Height: 720, FPS: 30, MaxKbps: 2000}, Hints{NativeBitrateControl: true, NativeKbps: 6500, PreferredMode: protocol.ModeH264Passthrough}, protocol.ModeH264Passthrough, 1280, 720, 2000 - 60, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SelectMode(h264Cam(), tc.req, hwFull, tc.hints)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Mode != tc.mode || got.Width != tc.w || got.Height != tc.h || got.CameraBitrateKbps != tc.camKbps || got.BitrateKbps != tc.kbps {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+	// no hw and tiny budget: error even with control
+	if _, err := SelectMode(h264Cam(), protocol.Profile{MaxKbps: 200}, protocol.Hardware{}, ctl); err == nil {
+		t.Fatal("want error")
+	}
+}
+
 func TestBudget(t *testing.T) {
 	for _, c := range [][3]int{{0, 0, 0}, {1000, 0, 1000}, {0, 800, 800}, {1000, 800, 800}, {500, 800, 500}} {
 		if got := Budget(c[0], c[1]); got != c[2] {
