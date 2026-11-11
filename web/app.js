@@ -20,6 +20,9 @@ let waitingForCamera = false;
 let errorText = "", errorAuth = false;
 let hasVideo = false, lastTime = -1, stallTicks = 0;
 let rotation = 0;
+let nightMode = "off";            // effective night_grayscale of the selected camera: off|auto|on
+let nightState = { gray: false, run: 0 }; // auto-mode state (see nightgray.js)
+let nightLast = null;             // last classification, for ?debugNight=1
 let mutePref = store.get("birdcam.muted"); // "1" muted, "0" sound, null = never chosen
 
 const keyOf = (c) => c.device_id + "/" + c.camera_id;
@@ -93,6 +96,7 @@ async function poll() {
   if (c) {
     const r = normRot(c.rotation);
     if (r !== rotation) { rotation = r; fit(); }
+    setNightMode(c.night_grayscale);
     if (waitingForCamera) restart(0);
   }
   renderNav();
@@ -181,6 +185,8 @@ function select(s) {
   errorAuth = false;
   const c = current();
   rotation = c ? normRot(c.rotation) : 0;
+  nightMode = "off";
+  setNightMode(c && c.night_grayscale);
   if (c) store.set("birdcam.camera", keyOf(c));
   const u = new URL(location.href);
   u.searchParams.set("device", s.device);
@@ -467,23 +473,33 @@ function fileName(c, start, mime) {
   return "birdcam-" + name + "-" + ts + "." + (/mp4/.test(mime) ? "mp4" : "webm");
 }
 
-// Upright video track: the raw track if not rotated, else a canvas capture of the rotated frames.
+// Upright video track: the raw track if not rotated and night grayscale is off, else a canvas
+// capture of the rotated frames with the grayscale filter applied while it is active.
 function recordVideoTrack(stream) {
   const raw = stream.getVideoTracks();
   const cv = document.createElement("canvas");
-  if (!rotation || !cv.captureStream || !video.videoWidth) return { tracks: raw, stop() {} };
+  if ((!rotation && nightMode === "off") || !cv.captureStream || !video.videoWidth) return { tracks: raw, stop() {} };
   const vw = video.videoWidth, vh = video.videoHeight, rot = rotation;
   const side = rot % 180 !== 0;
   cv.width = side ? vh : vw;
   cv.height = side ? vw : vh;
   const ctx = cv.getContext("2d");
+  const nativeFilter = "filter" in ctx; // Safari lacks ctx.filter: grayscale pixels by hand
   let alive = true;
   const rvfc = typeof video.requestVideoFrameCallback === "function";
   const draw = () => {
     if (!alive) return;
     ctx.setTransform(1, 0, 0, 1, cv.width / 2, cv.height / 2);
     ctx.rotate(rot * Math.PI / 180);
+    const gray = grayActive();
+    if (nativeFilter) ctx.filter = gray ? "grayscale(1)" : "none";
     ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+    if (gray && !nativeFilter) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const img = ctx.getImageData(0, 0, cv.width, cv.height), d = img.data;
+      for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      ctx.putImageData(img, 0, 0);
+    }
     if (rvfc) video.requestVideoFrameCallback(draw); else requestAnimationFrame(draw);
   };
   draw();
@@ -562,6 +578,54 @@ function errorFlash(msg) {
 }
 
 recBtn.onclick = () => (recorder ? stopRecording() : startRecording());
+
+// ---------- night grayscale ----------
+// "on" always shows grayscale, "auto" samples the video (see nightgray.js).
+// Display-only: the same state is applied to local recordings.
+
+const grayActive = () => nightMode === "on" || (nightMode === "auto" && nightState.gray);
+const debugNight = new URLSearchParams(location.search).get("debugNight") === "1";
+let nightDebugEl = null;
+let sampleCtx = null;
+
+function applyNight() {
+  video.classList.toggle("gray", grayActive());
+  if (!debugNight) return;
+  if (!nightDebugEl) { nightDebugEl = document.createElement("pre"); nightDebugEl.id = "night-debug"; box.append(nightDebugEl); }
+  const r = nightLast, f = (v) => (Number.isFinite(v) ? v.toFixed(1) : "-");
+  nightDebugEl.textContent = "night: " + nightMode + " -> " + (grayActive() ? "GRAY" : "colour") +
+    (nightMode === "auto" ? "\nspread " + (r ? f(r.spread) : "-") + "  (<" + NightGray.ENTER_SPREAD + " ir, >" + NightGray.EXIT_SPREAD + " day)" +
+      "\ncb " + (r ? f(r.meanCb) : "-") + "  cr " + (r ? f(r.meanCr) : "-") + "  valid " + (r ? Math.round(r.valid * 100) : "-") + "%" +
+      "  luma " + (r ? f(r.meanY) : "-") +
+      "\nsample: " + (r ? (r.unknown ? "unknown" : r.dark ? "dark" : r.ir ? "ir-like" : r.day ? "day-like" : "ambiguous") : "-") +
+      "  run " + nightState.run + "/" + NightGray.SWITCH_SAMPLES : "");
+}
+
+function setNightMode(m) {
+  m = m === "on" || m === "auto" ? m : "off";
+  if (m === nightMode) return;
+  nightMode = m;
+  nightState = { gray: false, run: 0 };
+  nightLast = null;
+  applyNight();
+}
+
+function sampleNight() {
+  if (nightMode !== "auto" || document.visibilityState === "hidden" ||
+      !hasVideo || video.paused || !video.videoWidth) return;
+  try {
+    if (!sampleCtx) {
+      const cv = document.createElement("canvas");
+      cv.width = NightGray.SAMPLE_W; cv.height = NightGray.SAMPLE_H;
+      sampleCtx = cv.getContext("2d", { willReadFrequently: true });
+    }
+    sampleCtx.drawImage(video, 0, 0, NightGray.SAMPLE_W, NightGray.SAMPLE_H);
+    nightLast = NightGray.classifyFrame(sampleCtx.getImageData(0, 0, NightGray.SAMPLE_W, NightGray.SAMPLE_H).data);
+  } catch (e) { return; } // tainted/unsupported canvas: leave the state alone
+  nightState = NightGray.step(nightState, nightLast);
+  applyNight();
+}
+setInterval(sampleNight, NightGray.SAMPLE_INTERVAL_MS);
 
 // ---------- lifecycle ----------
 

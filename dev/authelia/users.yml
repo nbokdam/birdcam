@@ -1,0 +1,14 @@
+# Dev users (file backend instead of lldap). Passwords: alice/alice, bob/bob.
+# Add a user: generate a hash with
+#   docker run --rm authelia/authelia:4.39.28 authelia crypto hash generate argon2 --password <pw>
+users:
+  alice:
+    displayname: Alice
+    email: alice@example.com
+    password: '$argon2id$v=19$m=65536,t=3,p=4$/If4Vxx/moVDcygWZvip6A$+bqvnREVCV2KUaOpcWC71B2610Ty9IvcsSX1cNVfarU'
+    groups: [family]
+  bob:
+    displayname: Bob
+    email: bob@example.com
+    password: '$argon2id$v=19$m=65536,t=3,p=4$JR7kSBvwVvEpwtmHroXy9Q$1IaYmbZQ6Ov5UmbOzAl/dtDC1bj3vXquUna+fU1S4uk'
+    groups: []

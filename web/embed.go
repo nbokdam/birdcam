@@ -3,7 +3,7 @@ package web
 
 import "embed"
 
-// Files contains index.html, app.js and style.css.
+// Files contains index.html, app.js, nightgray.js and style.css.
 //
-//go:embed index.html app.js style.css
+//go:embed index.html app.js nightgray.js style.css
 var Files embed.FS

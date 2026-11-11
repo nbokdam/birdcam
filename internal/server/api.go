@@ -12,20 +12,22 @@ import (
 
 // CameraInfo is one entry of GET /api/cameras.
 type CameraInfo struct {
-	DeviceID   string       `json:"device_id"`
-	DeviceName string       `json:"device_name"`
-	CameraID   string       `json:"camera_id"`
-	Name       string       `json:"name"`
-	Online     bool         `json:"online"`
-	Streaming  bool         `json:"streaming"`
-	Viewers    int          `json:"viewers"`
-	Mode       string       `json:"mode,omitempty"`
-	State      string       `json:"state"`
-	Error      string       `json:"error,omitempty"`
-	Audio      bool         `json:"audio"`
-	Rotation   int          `json:"rotation"`
-	Public     bool         `json:"public"`
-	Stats      *StreamStats `json:"stats,omitempty"`
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	CameraID   string `json:"camera_id"`
+	Name       string `json:"name"`
+	Online     bool   `json:"online"`
+	Streaming  bool   `json:"streaming"`
+	Viewers    int    `json:"viewers"`
+	Mode       string `json:"mode,omitempty"`
+	State      string `json:"state"`
+	Error      string `json:"error,omitempty"`
+	Audio      bool   `json:"audio"`
+	Rotation   int    `json:"rotation"`
+	// NightGrayscale is "off", "auto" or "on" (display-only, see docs).
+	NightGrayscale string       `json:"night_grayscale"`
+	Public         bool         `json:"public"`
+	Stats          *StreamStats `json:"stats,omitempty"`
 }
 
 // StreamStats describes the current ingest session.
@@ -70,17 +72,18 @@ func (s *Server) cameraList(include func(*camera) bool) []CameraInfo {
 		}
 		online := c.dev.online() && c.present
 		ci := CameraInfo{
-			DeviceID:   c.dev.cfg.ID,
-			DeviceName: c.dev.cfg.Name,
-			CameraID:   c.id,
-			Name:       s.cameraName(c),
-			Online:     online,
-			Viewers:    len(c.viewers),
-			Mode:       c.mode,
-			Error:      c.lastError,
-			Audio:      c.info.AudioDevice != "",
-			Rotation:   s.rotation(c),
-			Public:     s.cfg.CameraAccess(c.dev.cfg.ID, c.id) == nil,
+			DeviceID:       c.dev.cfg.ID,
+			DeviceName:     c.dev.cfg.Name,
+			CameraID:       c.id,
+			Name:           s.cameraName(c),
+			Online:         online,
+			Viewers:        len(c.viewers),
+			Mode:           c.mode,
+			Error:          c.lastError,
+			Audio:          c.info.AudioDevice != "",
+			Rotation:       s.rotation(c),
+			NightGrayscale: s.cfg.NightGrayscaleFor(c.dev.cfg.ID, c.id),
+			Public:         s.cfg.CameraAccess(c.dev.cfg.ID, c.id) == nil,
 		}
 		sess := c.session
 		ci.Streaming = s.streamingLocked(sess)

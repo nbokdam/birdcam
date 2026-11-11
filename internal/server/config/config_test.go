@@ -107,6 +107,8 @@ cameras:
 func TestValidateNewKeys(t *testing.T) {
 	for _, tc := range []struct{ yaml, want string }{
 		{"devices: [{id: a, key: k}]\ncameras: [{device_id: a, camera_id: c, rotation: 45}]", "rotation"},
+		{"devices: [{id: a, key: k, night_grayscale: x}]", "night_grayscale"},
+		{"devices: [{id: a, key: k}]\ncameras: [{device_id: a, camera_id: c, night_grayscale: ON}]", "night_grayscale"},
 		{"hosts: [{host: h, default_device: nope}]", "unknown device"},
 		{"auth: {oidc: {issuer: https://i}}", "client_id"},
 		{"auth: {oidc: {issuer: https://i, client_id: c, client_secret: s}}", "external_url"},
@@ -118,6 +120,29 @@ func TestValidateNewKeys(t *testing.T) {
 		_, err := Parse([]byte(tc.yaml))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: want %q, got %v", tc.yaml, tc.want, err)
+		}
+	}
+}
+
+func TestNightGrayscaleInheritance(t *testing.T) {
+	c, err := Parse([]byte(`
+devices:
+  - {id: a, key: k, night_grayscale: auto}
+  - {id: b, key: k}
+cameras:
+  - {device_id: a, camera_id: off, night_grayscale: "off"}
+  - {device_id: a, camera_id: on, night_grayscale: "on"}
+  - {device_id: b, camera_id: auto, night_grayscale: auto}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ dev, cam, want string }{
+		{"a", "none", "auto"}, {"a", "off", "off"}, {"a", "on", "on"},
+		{"b", "none", "off"}, {"b", "auto", "auto"}, {"zz", "x", "off"},
+	} {
+		if got := c.NightGrayscaleFor(tc.dev, tc.cam); got != tc.want {
+			t.Errorf("%s/%s: got %q, want %q", tc.dev, tc.cam, got, tc.want)
 		}
 	}
 }

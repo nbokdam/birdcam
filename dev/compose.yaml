@@ -1,4 +1,4 @@
-# Local OIDC test environment; see up.sh.
+# Local OIDC test environment; see README.md.
 # Caddy uses the host network so it can reach birdcam-server on 127.0.0.1:8080
 # regardless of host firewall rules for Docker bridges.
 name: birdcam-dev
@@ -7,8 +7,16 @@ services:
     image: authelia/authelia:4.39.28
     ports:
       - "127.0.0.1:9091:9091"
+    environment:
+      X_AUTHELIA_CONFIG_FILTERS: template
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/jwt-secret
+      AUTHELIA_SESSION_SECRET_FILE: /secrets/session-secret
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/storage-key
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE: /secrets/hmac-secret
     volumes:
-      - ./.secrets/authelia:/config
+      - ./authelia:/config:ro
+      - ./.secrets:/secrets:ro
+      - ./.secrets/authelia-data:/data
     restart: unless-stopped
   caddy:
     image: caddy:2.11.6

@@ -160,10 +160,17 @@ Each entry (existing fields kept):
 {
   "device_id": "maci-pi", "device_name": "Maci", "camera_id": "usb-...", "name": "Nest box",
   "online": true, "streaming": false, "viewers": 0, "state": "idle", "error": "",
-  "audio": true, "rotation": 90, "public": false, "stats": {...}
+  "audio": true, "rotation": 90, "night_grayscale": "auto", "public": false, "stats": {...}
 }
 ```
 - `rotation`: effective clockwise display rotation (server override > agent-reported > 0).
+- `night_grayscale`: `"off"|"auto"|"on"`, `cameras[].night_grayscale` > `devices[].night_grayscale` > `off`.
+  Display-only (like rotation): the browser applies a grayscale filter (also to local recordings)
+  because some IR-LED USB cameras stay in colour mode and show a uniform purple/red cast at night.
+  `on` = always, `auto` = the page samples the video every ~2 s and switches when the chroma of
+  the frame is uniform (tint of any colour) or ~zero, with debounce + hysteresis (`web/nightgray.js`,
+  thresholds at its top). Append `?debugNight=1` to the page URL to show a box with the live
+  spread/mean values and state, for tuning on real cameras.
 - `public`: false if the camera requires login/group membership.
 
 ### WHEP `POST /api/cameras/{device}/{camera}/whep`

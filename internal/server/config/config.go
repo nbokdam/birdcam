@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -136,15 +137,21 @@ type Profile struct {
 
 // Device is one agent allowed to connect.
 type Device struct {
-	ID   string `yaml:"id"`
-	Key  string `yaml:"key"`
-	Name string `yaml:"name"`
+	ID  string `yaml:"id"`
+	Key string `yaml:"key"`
+	// KeyFile reads the key from a file instead (trailing whitespace is
+	// ignored). Exactly one of Key and KeyFile must be set.
+	KeyFile string `yaml:"key_file"`
+	Name    string `yaml:"name"`
 	// MaxKbps is the upload budget of the device, shared by its streaming
 	// cameras (0 = unlimited).
 	MaxKbps int `yaml:"max_kbps"`
 	// Groups restricts the device's cameras to members of any of these
 	// groups (empty = public). Cameras can override it.
 	Groups []string `yaml:"groups"`
+	// NightGrayscale is the default night grayscale mode of the device's
+	// cameras (off, auto, on); cameras can override it.
+	NightGrayscale string `yaml:"night_grayscale"`
 }
 
 // CameraOverride overrides settings for a single camera.
@@ -165,28 +172,101 @@ type CameraOverride struct {
 	// Rotation overrides the agent-reported display rotation (0, 90, 180,
 	// 270 degrees clockwise).
 	Rotation *int `yaml:"rotation"`
+	// NightGrayscale overrides the device's night grayscale mode: the
+	// viewer shows the video in grayscale always ("on"), never ("off") or
+	// when the image looks like an IR image ("auto"). Display-only.
+	NightGrayscale string `yaml:"night_grayscale"`
 }
 
-// Load reads and validates the config file at path.
+// Night grayscale modes.
+const (
+	NightOff  = "off"
+	NightAuto = "auto"
+	NightOn   = "on"
+)
+
+// ValidNightGrayscale reports whether m is "" (unset) or a known mode.
+func ValidNightGrayscale(m string) bool {
+	return m == "" || m == NightOff || m == NightAuto || m == NightOn
+}
+
+// NightGrayscaleFor returns the effective night grayscale mode of a camera:
+// camera override, else device default, else "off".
+func (c *Config) NightGrayscaleFor(deviceID, cameraID string) string {
+	if o, ok := c.Camera(deviceID, cameraID); ok && o.NightGrayscale != "" {
+		return o.NightGrayscale
+	}
+	if d, ok := c.Device(deviceID); ok && d.NightGrayscale != "" {
+		return d.NightGrayscale
+	}
+	return NightOff
+}
+
+// Load reads and validates the config file at path. Relative file paths in
+// the config (state_dir, *_file, ingest cert/key) are resolved against the
+// directory of the config file.
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return Parse(raw)
+	return parse(raw, filepath.Dir(path))
 }
 
-// Parse parses and validates YAML config bytes, applying defaults.
-func Parse(raw []byte) (*Config, error) {
+// Parse parses and validates YAML config bytes, applying defaults. Relative
+// paths are resolved against the current directory.
+func Parse(raw []byte) (*Config, error) { return parse(raw, "") }
+
+func parse(raw []byte, baseDir string) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	c.resolvePaths(baseDir)
+	if err := c.readKeyFiles(); err != nil {
+		return nil, err
 	}
 	c.ApplyDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// resolvePaths makes relative file paths relative to baseDir.
+func (c *Config) resolvePaths(baseDir string) {
+	if baseDir == "" {
+		return
+	}
+	for _, p := range []*string{&c.StateDir, &c.Auth.SessionKeyFile, &c.Auth.OIDC.ClientSecretFile, &c.Ingest.CertFile, &c.Ingest.KeyFile} {
+		if *p != "" && !filepath.IsAbs(*p) {
+			*p = filepath.Join(baseDir, *p)
+		}
+	}
+	for i := range c.Devices {
+		if p := &c.Devices[i].KeyFile; *p != "" && !filepath.IsAbs(*p) {
+			*p = filepath.Join(baseDir, *p)
+		}
+	}
+}
+
+// readKeyFiles loads devices[].key_file into Key.
+func (c *Config) readKeyFiles() error {
+	for i := range c.Devices {
+		d := &c.Devices[i]
+		if d.KeyFile == "" {
+			continue
+		}
+		if d.Key != "" {
+			return fmt.Errorf("device %q: set either key or key_file, not both", d.ID)
+		}
+		b, err := os.ReadFile(d.KeyFile)
+		if err != nil {
+			return fmt.Errorf("device %q: %w", d.ID, err)
+		}
+		d.Key = strings.TrimSpace(string(b))
+	}
+	return nil
 }
 
 // ApplyDefaults fills in unset fields.
@@ -264,6 +344,9 @@ func (c *Config) Validate() error {
 		if d.MaxKbps < 0 {
 			errs = append(errs, fmt.Errorf("device %q: negative max_kbps", d.ID))
 		}
+		if !ValidNightGrayscale(d.NightGrayscale) {
+			errs = append(errs, fmt.Errorf("device %q: night_grayscale must be off, auto or on", d.ID))
+		}
 	}
 	for i, o := range c.Cameras {
 		if o.DeviceID == "" || o.CameraID == "" {
@@ -273,6 +356,9 @@ func (c *Config) Validate() error {
 		}
 		if o.Rotation != nil && !ValidRotation(*o.Rotation) {
 			errs = append(errs, fmt.Errorf("cameras[%d]: rotation must be 0, 90, 180 or 270", i))
+		}
+		if !ValidNightGrayscale(o.NightGrayscale) {
+			errs = append(errs, fmt.Errorf("cameras[%d]: night_grayscale must be off, auto or on", i))
 		}
 	}
 	for i, h := range c.Hosts {

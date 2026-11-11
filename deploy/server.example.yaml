@@ -111,6 +111,8 @@ default_profile:
 devices:
   - id: garden-pi
     key: "change-me-0123456789abcdef0123456789abcdef"
+    # or read it from a file (relative paths are relative to this config file):
+    # key_file: /etc/birdcam/keys/garden-pi
     name: Garden
     # Upload budget, split evenly over the device's cameras that are streaming
     # (a single streaming camera gets all of it). 0 = unlimited.
@@ -139,6 +141,7 @@ cameras:
     name: Nest box
     audio: false
     rotation: 90
+    night_grayscale: auto       # off (default) | auto | on; browser shows IR-tinted night video in grayscale
     # groups: [family, friends]   # overrides the device's groups
     # public: true                # visible to everyone, ignoring groups
     # hidden: true                # hide from the page and refuse viewers

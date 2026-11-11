@@ -53,8 +53,9 @@ func TestHostsDefaultDevice(t *testing.T) {
 func TestRotationAndNames(t *testing.T) {
 	r0, r270 := 0, 270
 	e := newTestEnvWith(t, 1, false, func(c *config.Config) {
+		c.Devices[0].NightGrayscale = config.NightAuto
 		c.Cameras = append(c.Cameras,
-			config.CameraOverride{DeviceID: "dev1", CameraID: "zero", Rotation: &r0, Name: "Configured"},
+			config.CameraOverride{DeviceID: "dev1", CameraID: "zero", Rotation: &r0, Name: "Configured", NightGrayscale: config.NightOn},
 			config.CameraOverride{DeviceID: "dev1", CameraID: "over", Rotation: &r270})
 	})
 	a, _, _ := e.runAgent(fakeagent.Config{NoStream: true, Cameras: []protocol.Camera{
@@ -76,6 +77,13 @@ func TestRotationAndNames(t *testing.T) {
 	}
 	decodeJSON(t, resp, &cams)
 	for _, c := range cams {
+		wantNight := config.NightAuto
+		if c.CameraID == "zero" {
+			wantNight = config.NightOn
+		}
+		if c.NightGrayscale != wantNight {
+			t.Errorf("%s: night_grayscale=%q, want %q", c.CameraID, c.NightGrayscale, wantNight)
+		}
 		w := want[c.CameraID]
 		if c.Rotation != w.rot || c.Name != w.name || c.DeviceName != "Garden" || !c.Public {
 			t.Errorf("%s: rotation=%d name=%q device=%q public=%v, want %d %q", c.CameraID, c.Rotation, c.Name, c.DeviceName, c.Public, w.rot, w.name)
