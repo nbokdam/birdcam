@@ -31,7 +31,7 @@ bin/birdcam-agent-linux-arm64:
 
 test:
 	go test ./...
-	node --test web/test
+	node --test web/test/*.test.mjs
 
 lint:
 	test -z "$$(gofmt -l .)"

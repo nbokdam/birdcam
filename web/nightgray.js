@@ -3,7 +3,7 @@
 // in colour mode at night, so the image has one uniform tint (purple/magenta,
 // sometimes red) or is already B&W. The viewer then shows the video in
 // grayscale. Pure functions only; app.js does the canvas sampling and the CSS.
-// Unit tests: web/test/nightgray.test.mjs (node --test web/test).
+// Unit tests: web/test/nightgray.test.mjs (node --test web/test/*.test.mjs).
 //
 // All thresholds below are initial guesses to be tuned with real nest-box
 // footage: open the page with ?debugNight=1 to see the live numbers.
