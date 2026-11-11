@@ -595,7 +595,7 @@ function applyNight() {
   const r = nightLast, f = (v) => (Number.isFinite(v) ? v.toFixed(1) : "-");
   nightDebugEl.textContent = "night: " + nightMode + " -> " + (grayActive() ? "GRAY" : "colour") +
     (nightMode === "auto" ? "\nspread " + (r ? f(r.spread) : "-") + "  (<" + NightGray.ENTER_SPREAD + " ir, >" + NightGray.EXIT_SPREAD + " day)" +
-      "\ncb " + (r ? f(r.meanCb) : "-") + "  cr " + (r ? f(r.meanCr) : "-") + "  valid " + (r ? Math.round(r.valid * 100) : "-") + "%" +
+      "\ntint " + (r ? f(r.tint) : "-") + " (>=" + NightGray.ENTER_TINT + " ir, <" + NightGray.EXIT_TINT + " day)  cb " + (r ? f(r.meanCb) : "-") + " cr " + (r ? f(r.meanCr) : "-") + "  valid " + (r ? Math.round(r.valid * 100) : "-") + "%" +
       "  luma " + (r ? f(r.meanY) : "-") +
       "\nsample: " + (r ? (r.unknown ? "unknown" : r.dark ? "dark" : r.ir ? "ir-like" : r.day ? "day-like" : "ambiguous") : "-") +
       "  run " + nightState.run + "/" + NightGray.SWITCH_SAMPLES : "");

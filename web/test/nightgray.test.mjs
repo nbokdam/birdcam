@@ -29,9 +29,16 @@ test("reddish IR tint is ir", () => {
   const r = NG.classifyFrame(tinted([1.4, 0.8, 0.8]));
   assert.ok(r.ir, JSON.stringify(r));
 });
-test("pure grayscale is ir", () => {
+test("neutral grey scene (grey wall in daylight, or a camera already in B&W) is day", () => {
   const r = NG.classifyFrame(frame((i) => { const l = 40 + (i % 64) * 3; return [l, l, l]; }));
-  assert.ok(r.ir && r.spread < 1, JSON.stringify(r));
+  assert.ok(r.day && !r.ir && r.spread < 1, JSON.stringify(r));
+  // slightly noisy, faintly bluish grey like the real C1-lookalike daylight frame
+  const w = NG.classifyFrame(frame((i) => { const l = 60 + (i % 9); return [l, l + 1, l + 2]; }));
+  assert.ok(w.day && !w.ir, JSON.stringify(w));
+});
+test("faint purple IR tint is ir", () => {
+  const r = NG.classifyFrame(frame((i) => { const l = (i % 11) - 5; return [130 + l, 115 + l, 135 + l]; }));
+  assert.ok(r.ir && r.tint >= NG.ENTER_TINT, JSON.stringify(r));
 });
 test("colourful scene is day", () => {
   const regions = [[40, 160, 50], [150, 100, 60], [90, 140, 220], [200, 190, 70], [120, 120, 120]];

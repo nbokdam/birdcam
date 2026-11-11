@@ -30,7 +30,16 @@ const NightGray = (() => {
   // Two thresholds (hysteresis): IR-like below ENTER, day-like above EXIT,
   // in between = ambiguous (state is kept).
   const ENTER_SPREAD = 8;
-  const EXIT_SPREAD = 16;
+  const EXIT_SPREAD = 12;
+
+  // tint = |(meanCb, meanCr)|, same units. An IR image from a camera that
+  // stays in colour mode is uniformly purple/red (faint purple ~8, strong ~25),
+  // a grey/white scene in daylight is neutral (~0-1). So a uniform image only
+  // counts as IR when it is clearly tinted (>= ENTER_TINT); a neutral uniform
+  // image (< EXIT_TINT) counts as day. Cameras that switch to B&W themselves
+  // are neutral at night too, which is fine: grey stays grey.
+  const ENTER_TINT = 5;
+  const EXIT_TINT = 3.5;
 
   // Consecutive agreeing samples needed to switch (3 samples ~ 6 s).
   const SWITCH_SAMPLES = 3;
@@ -68,7 +77,10 @@ const NightGray = (() => {
     }
     const meanCb = sCb / n, meanCr = sCr / n;
     const spread = Math.sqrt(Math.max(0, sCb2 / n - meanCb * meanCb) + Math.max(0, sCr2 / n - meanCr * meanCr));
-    return { spread, meanCb, meanCr, valid, meanY, dark: false, ir: spread < ENTER_SPREAD, day: spread > EXIT_SPREAD, unknown: false };
+    const tint = Math.hypot(meanCb, meanCr);
+    const ir = spread < ENTER_SPREAD && tint >= ENTER_TINT;
+    const day = spread > EXIT_SPREAD || tint < EXIT_TINT;
+    return { spread, meanCb, meanCr, tint, valid, meanY, dark: false, ir, day, unknown: false };
   }
 
   // Debounce/hysteresis. state = {gray: bool, run: int}; returns the new state
@@ -81,6 +93,6 @@ const NightGray = (() => {
   }
 
   return { SAMPLE_W, SAMPLE_H, SAMPLE_INTERVAL_MS, LUMA_MIN, LUMA_MAX, MIN_VALID_FRACTION,
-    DARK_LUMA, ENTER_SPREAD, EXIT_SPREAD, SWITCH_SAMPLES, classifyFrame, step };
+    DARK_LUMA, ENTER_SPREAD, EXIT_SPREAD, ENTER_TINT, EXIT_TINT, SWITCH_SAMPLES, classifyFrame, step };
 })();
 if (typeof module !== "undefined") module.exports = NightGray;
