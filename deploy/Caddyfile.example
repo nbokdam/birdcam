@@ -1,0 +1,32 @@
+# Caddy terminates TLS (automatic Let's Encrypt) and proxies to birdcam-server.
+# Caddy proxies WebSockets transparently, so /agent works as wss://.
+#
+# Only HTTP goes through Caddy. The ingest ports (TCP 9001-9010, TLS by
+# default with a certificate pinned via the control channel) and the WebRTC
+# media port (UDP 8189) go directly to birdcam-server.
+#
+# Viewer login (OIDC, e.g. Authelia) is handled by birdcam-server itself under
+# /auth/*; no forward_auth is needed. Caddy forwards the original Host header,
+# which the server's `hosts:` mapping and per-host login redirects use.
+# Agents should connect with wss://: the ingest certificate fingerprint they
+# pin is delivered over this channel.
+
+# Extra host names (see `hosts:` in server.yaml) can share the site block:
+# birdcam.example.com, maci.birdcam.example.com {
+
+birdcam.example.com {
+	# Agent control channel (WebSocket). Long-lived: no read timeouts.
+	handle /agent {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Access control for private cameras is done by birdcam-server (auth.oidc
+	# and groups in server.yaml). Do not put /agent or /auth/* behind
+	# forward_auth/basic_auth; agents authenticate with their key.
+}

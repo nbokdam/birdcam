@@ -1,0 +1,38 @@
+[Unit]
+Description=BirdCam server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/birdcam-server -config /etc/birdcam/server.yaml
+Restart=always
+RestartSec=2
+# Dedicated user; the config holds device keys and must not be world-readable:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin birdcam
+#   chown root:birdcam /etc/birdcam/server.yaml && chmod 640 /etc/birdcam/server.yaml
+User=birdcam
+Group=birdcam
+# /var/lib/birdcam (state_dir): generated ingest TLS certificate.
+StateDirectory=birdcam
+StateDirectoryMode=0700
+# Secrets (session key, OIDC client secret) also belong in /etc/birdcam, mode 640:
+#   openssl rand -hex 32 > /etc/birdcam/session.key
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# Ports are >1024; no capabilities needed.
+CapabilityBoundingSet=
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

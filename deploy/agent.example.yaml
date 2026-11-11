@@ -1,0 +1,31 @@
+# BirdCam agent configuration (/etc/birdcam/agent.yaml)
+
+# Control channel of the server (ws:// or wss://, path /agent).
+# The host part is also used for the ingest connections (ports 9001-9010).
+# Use wss:// in production: the ingest TLS pin is announced over this channel,
+# so ws:// leaves ingest open to a man in the middle (the agent logs a warning).
+server_url: ws://birdcam-server.local:8080/agent
+device_id: pi-garden
+key: change-me          # must match the key in the server's devices.yaml
+
+# Upload budget of this Pi in kbit/s (0 = unlimited). Applied on top of the
+# server's per-stream max_kbps: the lower of the two wins.
+max_upload_kbps: 0
+
+# If true, refuse to stream (report failed) when the server did not announce an
+# ingest certificate fingerprint, instead of falling back to plain TCP.
+require_ingest_tls: false
+
+# Path to gst-launch-1.0 (default: looked up in PATH).
+gst_launch: gst-launch-1.0
+
+# Optional per-camera overrides, keyed by camera id (see `birdcam-agent -list-cameras`).
+cameras: {}
+#  usb-usb-camera-manufacture-h264-usb-camera-2020052801:
+#    name: Bird feeder
+#    disabled: false
+#    audio_device: hw:CARD=Camera,DEV=0   # or "none" to disable audio
+#    preferred_mode: h264-passthrough     # or mjpeg-hwenc
+#    native_kbps: 7000                    # bitrate of the camera's built-in H.264 encoder
+#    rotation: 0                          # clockwise display rotation: 0, 90, 180 or 270
+#                                         # (metadata for viewers; video is not rotated; restart to apply)

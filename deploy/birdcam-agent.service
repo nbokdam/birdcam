@@ -1,0 +1,23 @@
+[Unit]
+Description=BirdCam agent (camera streaming to BirdCam server)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=birdcam-agent
+Group=birdcam-agent
+SupplementaryGroups=video audio
+ExecStart=/usr/local/bin/birdcam-agent -config /etc/birdcam/agent.yaml
+Restart=always
+RestartSec=5
+# gst-launch children are killed by the agent; make sure none survive a stop.
+KillMode=control-group
+TimeoutStopSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

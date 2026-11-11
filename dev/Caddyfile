@@ -1,0 +1,13 @@
+{
+	local_certs
+	skip_install_trust
+	http_port 8480
+}
+
+auth.birdcam.localhost:8443 {
+	reverse_proxy 127.0.0.1:9091
+}
+
+birdcam.localhost:8443 {
+	reverse_proxy 127.0.0.1:8080
+}
