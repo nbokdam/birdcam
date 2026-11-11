@@ -21,7 +21,7 @@ import (
 )
 
 // Version is reported to agents in Welcome.
-const Version = "2.0.0"
+var Version = "dev" // set with -ldflags "-X birdcam/internal/server.Version=..."
 
 // Timing holds all timeouts; tests shrink them.
 type Timing struct {

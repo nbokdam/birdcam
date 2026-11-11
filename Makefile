@@ -1,14 +1,25 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-PI ?= birdcam@192.168.11.115
-LDFLAGS := -s -w -X main.version=$(VERSION)
+# Pi to deploy the agent to: make deploy-agent PI=user@host
+PI ?= birdcam@raspberrypi.local
+AGENT_LDFLAGS := -s -w -X main.version=$(VERSION)
+SERVER_LDFLAGS := -s -w -X birdcam/internal/server.Version=$(VERSION)
+IMAGE ?= ghcr.io/nbokdam/birdcam-server
 
-.PHONY: build-agent deploy-agent test
+.PHONY: build build-agent build-server image deploy-agent test lint
+
+build: build-agent build-server
 
 build-agent:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/birdcam-agent-linux-arm64 ./cmd/birdcam-agent
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "$(LDFLAGS)" -o bin/birdcam-agent-linux-armv7 ./cmd/birdcam-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/birdcam-agent-linux-arm64 ./cmd/birdcam-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/birdcam-agent-linux-armv7 ./cmd/birdcam-agent
 
-# Usage: make deploy-agent PI=birdcam@192.168.11.115
+build-server:
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(SERVER_LDFLAGS)" -o bin/birdcam-server ./cmd/birdcam-server
+
+# Local container image of the server (CI builds and pushes multi-arch images).
+image:
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):dev .
+
 deploy-agent: bin/birdcam-agent-linux-arm64
 	ssh -o BatchMode=yes $(PI) 'mkdir -p ~/birdcam-agent-deploy'
 	scp -o BatchMode=yes bin/birdcam-agent-linux-arm64 $(PI):birdcam-agent-deploy/birdcam-agent
@@ -20,3 +31,8 @@ bin/birdcam-agent-linux-arm64:
 
 test:
 	go test ./...
+	node --test web/test
+
+lint:
+	test -z "$$(gofmt -l .)"
+	go vet ./...
