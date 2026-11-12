@@ -5,6 +5,7 @@ package fakeagent
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -38,8 +39,13 @@ type Config struct {
 	Key       string
 	// Cameras reported in hello. Default: one camera "fakecam".
 	Cameras []protocol.Camera
-	// IngestHost to connect to; default the host of ServerURL.
+	// IngestHost to connect to; default the ingest_host of Start, else the
+	// host of ServerURL.
 	IngestHost string
+	// AgentVersion and Platform are reported in hello (defaults "fakeagent"
+	// and none), to exercise the server's update offer.
+	AgentVersion string
+	Platform     string
 	// NewSource creates the video source for a session. Default synthetic.
 	NewSource func() (FrameSource, error)
 	FPS       int  // default 30
@@ -134,7 +140,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		ProtocolVersion: a.cfg.ProtocolVersion,
 		DeviceID:        a.cfg.DeviceID,
 		Key:             a.cfg.Key,
-		AgentVersion:    "fakeagent",
+		AgentVersion:    cmp.Or(a.cfg.AgentVersion, "fakeagent"),
+		Platform:        a.cfg.Platform,
 		Hardware:        protocol.Hardware{Model: "fake"},
 		Cameras:         a.cfg.Cameras,
 	}); err != nil {
@@ -271,8 +278,9 @@ func (a *Agent) start(ctx context.Context, s protocol.Start) {
 	}()
 }
 
-func (a *Agent) ingestAddr(port int) (string, error) {
-	host := a.cfg.IngestHost
+func (a *Agent) ingestAddr(s protocol.Start) (string, error) {
+	port := s.Port
+	host := cmp.Or(a.cfg.IngestHost, s.IngestHost)
 	if host == "" {
 		u, err := url.Parse(a.cfg.ServerURL)
 		if err != nil {
@@ -289,7 +297,7 @@ func (a *Agent) stream(ctx context.Context, s protocol.Start, running func()) er
 	if err != nil {
 		return err
 	}
-	addr, err := a.ingestAddr(s.Port)
+	addr, err := a.ingestAddr(s)
 	if err != nil {
 		return err
 	}

@@ -24,6 +24,12 @@ type Handler interface {
 	OnDisconnect()
 }
 
+// WelcomeHandler is optionally implemented by a Handler that wants the
+// Welcome of every new control connection (e.g. to act on an update offer).
+type WelcomeHandler interface {
+	OnWelcome(protocol.Welcome)
+}
+
 // Client maintains the control WebSocket to the server.
 type Client struct {
 	URL     string
@@ -139,6 +145,9 @@ func (c *Client) session(ctx context.Context) error {
 	}
 	fp := welcome.IngestCertSHA256
 	c.Log.Info("connected to server", "url", c.URL)
+	if wh, ok := c.Handler.(WelcomeHandler); ok {
+		wh.OnWelcome(welcome)
+	}
 
 	c.connMu.Lock()
 	c.conn = conn

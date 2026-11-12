@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"runtime"
 	"sync"
 	"time"
 
 	"birdcam/internal/protocol"
 )
+
+// agentPlatform is reported in Hello so the server can offer a matching build.
+var agentPlatform = runtime.GOOS + "/" + runtime.GOARCH
 
 // RescanInterval is how often the camera set is re-discovered.
 const RescanInterval = 10 * time.Second
@@ -30,6 +34,12 @@ type Agent struct {
 
 	mu      sync.Mutex
 	cameras []Discovered
+
+	updater *updater
+	// runCtx/restart are set by Run; restart ends Run so that systemd starts
+	// the agent again (used to switch to a downloaded update).
+	runCtx  context.Context
+	restart context.CancelFunc
 }
 
 func New(cfg *Config, version string, log *slog.Logger) *Agent {
@@ -40,6 +50,7 @@ func New(cfg *Config, version string, log *slog.Logger) *Agent {
 
 		applyBitrate: ApplyBitrate,
 	}
+	a.updater = newUpdater(cfg, version, log)
 	a.client = &Client{
 		URL:     cfg.ServerURL,
 		Hello:   a.hello,
@@ -72,13 +83,20 @@ func (a *Agent) hello() protocol.Hello {
 		DeviceID:        a.cfg.DeviceID,
 		Key:             a.cfg.Key,
 		AgentVersion:    a.version,
+		Platform:        agentPlatform,
 		Hardware:        a.hw,
 		Cameras:         ProtocolCameras(a.cameras),
 	}
 }
 
-// Run blocks until ctx is cancelled.
+// Run blocks until ctx is cancelled or an update asks for a restart.
 func (a *Agent) Run(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a.mu.Lock()
+	a.runCtx, a.restart = ctx, cancel
+	a.mu.Unlock()
+	a.updater.confirmAfter(ctx, StableAfter)
 	a.cameras = Scan(a.disc, a.cfg)
 	a.log.Info("agent starting", "device", a.cfg.DeviceID, "model", a.hw.Model,
 		"hw_encoder", a.hw.HWH264Encoder, "hw_jpeg_decoder", a.hw.HWMJPEGDecoder, "cameras", len(a.cameras))
@@ -211,6 +229,28 @@ func (a *Agent) OnStart(s protocol.Start, ingestFP string) {
 		"size", fmt.Sprintf("%dx%d", sel.Width, sel.Height), "fps", sel.FPS, "kbps", sel.BitrateKbps, "camera_kbps", sel.CameraBitrateKbps,
 		"swdecode", pp.SWDecode && plan.FallbackArgs == nil, "audio", pp.AudioDevice, "audio_rate", pp.AudioRate)
 	a.sup.Start(plan)
+}
+
+// OnWelcome implements WelcomeHandler: act on an update offer of the server.
+func (a *Agent) OnWelcome(w protocol.Welcome) {
+	if w.AgentUpdate == nil {
+		return
+	}
+	if !a.cfg.AutoUpdateEnabled() {
+		a.log.Info("server offers an agent update but auto_update is off", "version", w.AgentUpdate.Version)
+		return
+	}
+	if a.version == "dev" || a.version == "" {
+		return // development builds are never replaced
+	}
+	a.mu.Lock()
+	ctx, restart := a.runCtx, a.restart
+	a.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+	a.log.Info("server offers an agent update", "from", a.version, "to", w.AgentUpdate.Version)
+	go a.updater.run(ctx, *w.AgentUpdate, func() bool { return a.sup.Active() == 0 }, restart)
 }
 
 // OnStop implements Handler.

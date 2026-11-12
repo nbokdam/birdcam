@@ -146,7 +146,11 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 
 	log = log.With("device", dev.cfg.ID)
 	ac := &agentConn{dev: dev, ws: ws, log: log, out: make(chan []byte, 256), done: make(chan struct{})}
-	ac.send(protocol.TypeWelcome, protocol.Welcome{ServerVersion: Version, IngestCertSHA256: s.ingestFingerprint})
+	welcome := protocol.Welcome{ServerVersion: Version, IngestCertSHA256: s.ingestFingerprint, AgentUpdate: s.updateFor(hello)}
+	if welcome.AgentUpdate != nil {
+		log.Info("offering agent update", "from", hello.AgentVersion, "to", welcome.AgentUpdate.Version, "platform", hello.Platform)
+	}
+	ac.send(protocol.TypeWelcome, welcome)
 
 	if !s.attachAgent(ac, hello) {
 		ac.close("server shutting down")

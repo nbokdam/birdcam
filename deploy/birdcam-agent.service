@@ -8,6 +8,8 @@ Type=simple
 User=birdcam-agent
 Group=birdcam-agent
 SupplementaryGroups=video audio
+# Downloaded updates (server-pushed agent builds) live in /var/lib/birdcam-agent/update.
+StateDirectory=birdcam-agent
 ExecStart=/usr/local/bin/birdcam-agent -config /etc/birdcam/agent.yaml
 Restart=always
 RestartSec=5

@@ -1,7 +1,8 @@
 # BirdCam agent configuration (/etc/birdcam/agent.yaml)
 
 # Control channel of the server (ws:// or wss://, path /agent).
-# The host part is also used for the ingest connections (ports 9001-9010).
+# The host part is also used for the ingest connections (ports 9001-9010)
+# unless the server tells the agent another ingest host (ingest.public_host).
 # Use wss:// in production: the ingest TLS pin is announced over this channel,
 # so ws:// leaves ingest open to a man in the middle (the agent logs a warning).
 server_url: ws://birdcam-server.local:8080/agent
@@ -16,6 +17,18 @@ max_upload_kbps: 0
 # ingest certificate fingerprint, instead of falling back to plain TCP.
 require_ingest_tls: false
 
+# Self-update: the server ships the agent builds and offers one whenever its
+# version differs from this agent's. The agent downloads it (HTTPS, with the
+# device key), verifies the checksum announced over the control channel, and
+# restarts into it as soon as no stream is running. If the new build keeps
+# failing to start it is dropped again and the installed version runs.
+# The installed binary in /usr/local/bin is never modified; downloads go to
+# state_dir/update, which must be writable by the agent user. Set auto_update
+# to false to only update through install-agent.sh. Development builds
+# (version "dev") are never replaced.
+auto_update: true
+state_dir: /var/lib/birdcam-agent
+
 # Path to gst-launch-1.0 (default: looked up in PATH).
 gst_launch: gst-launch-1.0
 
@@ -28,7 +41,7 @@ cameras: {}
 #    preferred_mode: h264-passthrough     # or mjpeg-hwenc
 #    native_kbps: 7000                    # bitrate of the camera's built-in H.264 encoder
                                          # (default: measured, or 7000 without bitrate control)
-    native_bitrate_control: true         # Sonix cameras: set the H.264 bitrate natively (UVC
+#    native_bitrate_control: true         # Sonix cameras: set the H.264 bitrate natively (UVC
                                          # extension unit) to fit the upload budget; false disables
 #    rotation: 0                          # clockwise display rotation: 0, 90, 180 or 270
 #                                         # (metadata for viewers; video is not rotated; restart to apply)

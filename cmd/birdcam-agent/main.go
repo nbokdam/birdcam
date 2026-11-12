@@ -68,6 +68,10 @@ func main() {
 		log.Error("load config", "err", err)
 		os.Exit(1)
 	}
+	// Switch to a build the server pushed earlier (execs, returns otherwise).
+	if version != "dev" && cfg.AutoUpdateEnabled() {
+		agent.ExecOverride(cfg.StateDir, version, log)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	agent.New(cfg, version, log).Run(ctx)

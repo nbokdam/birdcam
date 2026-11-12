@@ -36,6 +36,8 @@ func TestValidate(t *testing.T) {
 		{"ingest: {port_min: 9010, port_max: 9001}", "invalid port range"},
 		{"webrtc: {public_ips: [nope]}", "invalid public ip"},
 		{"cameras: [{device_id: x, camera_id: y}]", "unknown device"},
+		{"ingest: {public_host: \"node.example.com:9001\"}", "public_host"},
+		{"ingest: {public_host: \"https://node.example.com\"}", "public_host"},
 	} {
 		_, err := Parse([]byte(tc.yaml))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -144,5 +146,24 @@ cameras:
 		if got := c.NightGrayscaleFor(tc.dev, tc.cam); got != tc.want {
 			t.Errorf("%s/%s: got %q, want %q", tc.dev, tc.cam, got, tc.want)
 		}
+	}
+}
+
+func TestIngestPublicHostAndAgentUpdates(t *testing.T) {
+	c, err := Parse([]byte("ingest: {public_host: 203.0.113.7}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Ingest.PublicHost != "203.0.113.7" || c.AgentUpdates.Dir != "/usr/share/birdcam/agents" || c.AgentUpdates.Disabled {
+		t.Fatalf("%+v %+v", c.Ingest, c.AgentUpdates)
+	}
+	for _, h := range []string{"node1.example.com", "2001:db8::1", ""} {
+		if _, err := Parse([]byte("ingest: {public_host: \"" + h + "\"}")); err != nil {
+			t.Errorf("public_host %q rejected: %v", h, err)
+		}
+	}
+	c, err = Parse([]byte("agent_updates: {dir: /srv/agents, disabled: true}"))
+	if err != nil || c.AgentUpdates.Dir != "/srv/agents" || !c.AgentUpdates.Disabled {
+		t.Fatalf("%+v %v", c.AgentUpdates, err)
 	}
 }

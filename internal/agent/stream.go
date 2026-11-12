@@ -157,6 +157,13 @@ func (s *Supervisor) Stop(cameraID, sessionID string) {
 	}
 }
 
+// Active returns the number of running stream sessions.
+func (s *Supervisor) Active() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.sessions)
+}
+
 // StopAll stops every session and waits until all processes are gone.
 func (s *Supervisor) StopAll() {
 	s.mu.Lock()
@@ -281,7 +288,11 @@ func (se *session) runOnce(ctx context.Context) (time.Duration, error) {
 			return time.Since(t0), fmt.Errorf("prepare: %w", err)
 		}
 	}
-	conn, err := dialIngest(ctx, cfg.ServerHost, st.Port, cfg.DialTimeout, se.plan.IngestCertSHA256)
+	host := cfg.ServerHost
+	if st.IngestHost != "" {
+		host = st.IngestHost // the server wants the media on another address than the control channel
+	}
+	conn, err := dialIngest(ctx, host, st.Port, cfg.DialTimeout, se.plan.IngestCertSHA256)
 	if err != nil {
 		return time.Since(t0), fmt.Errorf("connect ingest: %w", err)
 	}

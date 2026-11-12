@@ -5,6 +5,9 @@ Live video and audio from nest box cameras on Raspberry Pis, watched in the brow
 - **Only streams while someone watches.** Each Pi keeps a small control connection to the
   server; the camera pipeline starts when the first viewer arrives and stops 30 s after
   the last one leaves. That keeps a slow home uplink free.
+- **Pi behind any NAT, nothing to forward.** The Pi only makes outgoing connections; the
+  server tells it per stream where to send the media (`ingest.public_host`), so the control
+  channel can sit behind a load balancer while video goes straight to the server's node.
 - **No transcoding on the server.** The Pi sends H.264 + Opus (RTP over a TLS-pinned TCP
   connection) and the server forwards the packets unchanged to browsers via WebRTC.
 - **Hardware encoding on the Pi.** Cameras with built-in H.264 are passed through (with
@@ -50,6 +53,10 @@ hardware encoder): download `birdcam-agent-linux-arm64`, then on the Pi run
 `deploy/install-agent.sh` (installs GStreamer, a service user and the systemd unit) and
 edit `/etc/birdcam/agent.yaml` (see [`deploy/agent.example.yaml`](deploy/agent.example.yaml)).
 `birdcam-agent -list-cameras` shows what the agent detects.
+After that the Pis **update themselves**: the server image ships the agent builds and offers
+one to every agent that runs another version; the agent downloads and verifies it and restarts
+into it when no stream is running (see [architecture](docs/ARCHITECTURE.md#agent-self-update);
+`auto_update: false` turns it off).
 
 ## Develop
 

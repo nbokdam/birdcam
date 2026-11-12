@@ -23,9 +23,22 @@ type Config struct {
 	GstLaunch     string `yaml:"gst_launch"`
 	// RequireIngestTLS refuses to stream unless the server announced an
 	// ingest certificate fingerprint (i.e. never fall back to plain TCP).
-	RequireIngestTLS bool                    `yaml:"require_ingest_tls"`
-	Cameras          map[string]CameraConfig `yaml:"cameras"` // keyed by camera id
+	RequireIngestTLS bool `yaml:"require_ingest_tls"`
+	// StateDir holds downloaded agent updates (StateDir/update). It must be
+	// writable by the agent user. Default /var/lib/birdcam-agent.
+	StateDir string `yaml:"state_dir"`
+	// AutoUpdate (default true) lets the server replace this agent with the
+	// build it ships: the agent downloads, verifies and restarts into it once
+	// no stream is running. Set false to only update via install-agent.sh.
+	AutoUpdate *bool                   `yaml:"auto_update"`
+	Cameras    map[string]CameraConfig `yaml:"cameras"` // keyed by camera id
 }
+
+// DefaultStateDir is where the agent keeps downloaded updates.
+const DefaultStateDir = "/var/lib/birdcam-agent"
+
+// AutoUpdateEnabled reports whether server-pushed updates are applied.
+func (c *Config) AutoUpdateEnabled() bool { return c.AutoUpdate == nil || *c.AutoUpdate }
 
 // CameraConfig holds optional per-camera overrides.
 type CameraConfig struct {
@@ -59,6 +72,9 @@ func ParseConfig(data []byte) (*Config, error) {
 	}
 	if c.GstLaunch == "" {
 		c.GstLaunch = "gst-launch-1.0"
+	}
+	if c.StateDir == "" {
+		c.StateDir = DefaultStateDir
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

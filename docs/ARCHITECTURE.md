@@ -22,7 +22,7 @@ The wire contract lives in `internal/protocol/protocol.go` and is authoritative.
 | Port | Proto | Use |
 |---|---|---|
 | 8080 | TCP | HTTP: web page, `/agent` WebSocket, `/api/...` signalling |
-| 9001–9010 | TCP (TLS 1.3 by default) | ingest pool, shared by all agents/cameras |
+| 9001–9010 | TCP (TLS 1.3 by default) | ingest pool, shared by all agents/cameras; reached via the host of `server_url` or the `ingest_host` the server announces |
 | 8189 | UDP | WebRTC media (pion UDP mux, single port) |
 
 ## Control channel
@@ -39,13 +39,51 @@ The wire contract lives in `internal/protocol/protocol.go` and is authoritative.
 ## Streaming lifecycle (per camera)
 1. First viewer for camera C → server allocates a free port P from the pool, a random
    `session_id` and `token`, sends `start{camera_id, session_id, port, token, profile}`.
-2. Agent builds a pipeline (see modes), connects TCP to SERVER:P (TLS if `welcome` carried
-   `ingest_cert_sha256`), writes `BIRDCAM1 <session_id> <token>\n`, then copies gst-launch
+2. Agent builds a pipeline (see modes), connects TCP to `<ingest host>:P` (TLS if `welcome`
+   carried `ingest_cert_sha256`), writes `BIRDCAM1 <session_id> <token>\n`, then copies gst-launch
    stdout (RFC 4571 framed RTP) into the socket. Reports `stream_status` starting/running/failed.
 3. Server ingest listener on P accepts only a connection whose preamble matches the
    pending session (else closes immediately), then reads frames and routes by payload type:
    96 = H.264 (90 kHz) → video track, 111 = Opus (48 kHz) → audio track.
 4. Last viewer leaves → after 30 s linger, server sends `stop`, frees the port.
+
+## Ingest host (control and media on different addresses)
+The control WebSocket and the media connection do not have to reach the server through the
+same address. `start.ingest_host` (set from the server's `ingest.public_host`) tells the agent
+where to open the ingest connection; without it the agent uses the host of its `server_url`.
+This lets the agents keep one stable name for the control channel (a load balancer or proxy,
+only HTTP/WebSocket) while video goes straight to the machine that runs the server, e.g. the
+Kubernetes node a pod runs on (the pod advertises its own node, so it follows the pod when it
+moves and every replica announces its own). There is no fallback: if the announced address is
+unreachable, the stream fails like any ingest connection failure. The TLS pin is unaffected
+(the agent pins the fingerprint, not a host name, so an IP works).
+
+## Agent self-update
+The server image ships the agent builds (`/usr/share/birdcam/agents/birdcam-agent-linux-arm64`
+and `-linux-armv7`, built with the same version as the server). The agent reports its version
+and platform (`GOOS/GOARCH`) in `hello`; if the version differs from the server's, `welcome`
+carries `agent_update{version, sha256, size, path}`. Never offered to development builds
+(`dev`), nor by a `dev` server, nor when the agent did not report a platform (old agents).
+1. The agent downloads `path` from the HTTP base of `server_url` (`wss`→`https`) with
+   `X-Birdcam-Device` and `Authorization: Bearer <device key>` (redirects are not followed).
+2. It checks size and SHA-256 (announced over the control channel, so trust is anchored there:
+   use `wss://`), then runs the file with `-version`, which must print the announced version
+   (catches a wrong architecture or a `noexec` state dir). Only then it is moved into
+   `<state_dir>/update/birdcam-agent`.
+3. Once no stream is running the agent exits; systemd (`Restart=always`) starts the installed
+   `/usr/local/bin/birdcam-agent`, which never changes. At startup that binary execs the
+   downloaded one when it reports another version.
+Roll-out therefore follows the server: a new image restarts the server, every agent
+reconnects, is offered the new build and switches when idle. Rolling the server back rolls the
+agents back too (their version just differs).
+
+Safety: a downloaded build is *pending* until it has run for 60 s. If it was started 3 times
+without getting there, it is deleted, its version is remembered in `update/bad` (not offered
+again), and the installed binary runs. `install-agent.sh` removes `update/`, so a manual
+install always wins. `auto_update: false` in `agent.yaml` disables it; `state_dir` (default
+`/var/lib/birdcam-agent`, `StateDirectory=` in the unit) must be writable by the agent user.
+The very first build with this feature must be installed by hand (`make deploy-agent`); older
+agents ignore the offer.
 
 ## Ingest TLS
 `ingest.tls` (default true): every ingest connection must complete a TLS 1.3 handshake

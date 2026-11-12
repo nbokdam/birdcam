@@ -20,6 +20,8 @@ fi
 usermod -aG video,audio birdcam-agent
 
 install -m 0755 "$BIN" /usr/local/bin/birdcam-agent
+# A manual install wins over a build the server pushed earlier (see auto_update).
+rm -rf /var/lib/birdcam-agent/update
 
 install -d -m 0755 /etc/birdcam
 if [ ! -f /etc/birdcam/agent.yaml ]; then

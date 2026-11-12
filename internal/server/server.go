@@ -89,6 +89,9 @@ type Server struct {
 	// ingestFingerprint is the SHA-256 of the ingest TLS certificate ("" =
 	// plain TCP ingest).
 	ingestFingerprint string
+	// agentBins are the agent builds offered for self-update, by platform
+	// ("linux/arm64"); nil when updates are off.
+	agentBins map[string]*agentBinary
 
 	mu      sync.Mutex
 	closed  bool
@@ -139,6 +142,7 @@ func New(opts Options) (*Server, error) {
 		s.auth = a
 	}
 	s.warnAccessConfig()
+	s.agentBins = loadAgentBinaries(cfg.AgentUpdates, Version, log)
 	var tlsCfg *tls.Config
 	if cfg.Ingest.TLSEnabled() {
 		cert, fp, err := ingest.LoadOrCreateCert(cfg.Ingest.CertFile, cfg.Ingest.KeyFile, cfg.StateDir)
@@ -184,6 +188,7 @@ func (s *Server) IngestPorts() []int { return s.ingest.Ports() }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /agent", s.handleAgent)
+	mux.HandleFunc("GET /agent/binary/{platform}", s.handleAgentBinary)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/cameras", s.handleCameras)
 	if s.auth != nil {

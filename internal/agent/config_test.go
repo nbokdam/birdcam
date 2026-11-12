@@ -81,3 +81,20 @@ func TestRotationInHelloAndCameras(t *testing.T) {
 		t.Errorf("cameras json %s", raw)
 	}
 }
+
+func TestConfigUpdateDefaults(t *testing.T) {
+	c, err := ParseConfig([]byte("server_url: wss://x/agent\ndevice_id: a\nkey: b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.StateDir != DefaultStateDir || !c.AutoUpdateEnabled() {
+		t.Fatalf("defaults: %+v", c)
+	}
+	c, err = ParseConfig([]byte("server_url: wss://x/agent\ndevice_id: a\nkey: b\nstate_dir: /tmp/s\nauto_update: false"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.StateDir != "/tmp/s" || c.AutoUpdateEnabled() {
+		t.Fatalf("overrides: %+v", c)
+	}
+}

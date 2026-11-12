@@ -40,6 +40,8 @@ type Config struct {
 	Ingest Ingest `yaml:"ingest"`
 	// WebRTC configures the media transport to browsers.
 	WebRTC WebRTC `yaml:"webrtc"`
+	// AgentUpdates configures pushing new agent binaries to the Pis.
+	AgentUpdates AgentUpdates `yaml:"agent_updates"`
 	// DefaultProfile is requested from agents unless overridden per camera.
 	DefaultProfile Profile `yaml:"default_profile"`
 	// Devices are the agents (Pis) allowed to connect.
@@ -108,6 +110,24 @@ type Ingest struct {
 	// self-signed ECDSA certificate is generated and kept in StateDir.
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+	// PublicHost, if set, is sent to agents in every Start as the host to
+	// open the ingest connection to (a host name or IP, no port). Use it when
+	// the control WebSocket goes through a load balancer or proxy but the
+	// ingest ports are reachable directly on the node running the server.
+	// Empty = agents use the host of their server_url.
+	PublicHost string `yaml:"public_host"`
+}
+
+// AgentUpdates configures the agent self-update. The server offers the agent
+// binaries found in Dir to every agent whose reported version differs from the
+// server's own version. Disabled for development builds (version "dev") and
+// when Dir does not exist.
+type AgentUpdates struct {
+	// Dir holds birdcam-agent-linux-arm64 and birdcam-agent-linux-armv7
+	// (the container image ships them in /usr/share/birdcam/agents).
+	Dir string `yaml:"dir"`
+	// Disabled turns the feature off even if Dir exists.
+	Disabled bool `yaml:"disabled"`
 }
 
 // TLSEnabled reports whether ingest connections use TLS.
@@ -293,6 +313,9 @@ func (c *Config) ApplyDefaults() {
 	if c.StateDir == "" {
 		c.StateDir = "/var/lib/birdcam"
 	}
+	if c.AgentUpdates.Dir == "" {
+		c.AgentUpdates.Dir = "/usr/share/birdcam/agents"
+	}
 	c.ExternalURL = strings.TrimSuffix(c.ExternalURL, "/")
 	o := &c.Auth.OIDC
 	if len(o.Scopes) == 0 {
@@ -321,6 +344,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("ingest: invalid port range %d-%d", c.Ingest.PortMin, c.Ingest.PortMax))
 	} else if c.Ingest.PortMax-c.Ingest.PortMin >= 1000 {
 		errs = append(errs, errors.New("ingest: port range larger than 1000 ports"))
+	}
+	if h := c.Ingest.PublicHost; h != "" && (strings.ContainsAny(h, "/:@ ") && net.ParseIP(h) == nil) {
+		errs = append(errs, fmt.Errorf("ingest: public_host must be a host name or IP address without port, got %q", h))
 	}
 	if c.WebRTC.UDPPort < 0 || c.WebRTC.UDPPort > 65535 {
 		errs = append(errs, fmt.Errorf("webrtc: invalid udp_port %d", c.WebRTC.UDPPort))

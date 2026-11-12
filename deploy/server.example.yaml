@@ -34,6 +34,13 @@ ingest:
   port_min: 9001
   port_max: 9010
   # bind: ""          # optional bind address, default all interfaces
+  # Host (name or IP) the agents must send their media to. Agents always
+  # connect their control WebSocket to the stable name in their server_url, and
+  # the server tells them in every `start` where to stream. Set this when the
+  # control channel goes through a load balancer or proxy but the ingest ports
+  # are reachable directly on the machine that runs the server (e.g. the node
+  # a Kubernetes pod runs on). Empty = agents use the host of their server_url.
+  # public_host: "203.0.113.10"
   # Encrypt media from the agents with TLS (1.3). The server sends the
   # SHA-256 of its certificate to each agent over the control WebSocket and
   # the agent pins it, so a self-signed certificate is fine. That pin is only
@@ -43,6 +50,16 @@ ingest:
   # is generated in state_dir on first start.
   # cert_file: /etc/birdcam/ingest-cert.pem
   # key_file: /etc/birdcam/ingest-key.pem
+
+# Agent self-update. The server image ships agent builds (same version as the
+# server) in /usr/share/birdcam/agents; every agent that reports a different
+# version is offered the matching build and restarts into it when idle.
+# Disabled for development builds and when the directory has no builds. For a
+# non-container install, build them with `make build-agent` and point dir at
+# the bin/ directory.
+# agent_updates:
+#   dir: /usr/share/birdcam/agents
+#   disabled: false
 
 webrtc:
   # All WebRTC media to browsers uses this single UDP port. Open/forward it.

@@ -8,7 +8,8 @@
 // agent then reconnects with backoff.
 //
 // Media channel: one TCP connection per streaming camera, to a port from the
-// server's ingest pool. The agent sends IngestPreamble, then RFC 4571 framed
+// server's ingest pool, on the host of the agent's server_url or the host
+// the server announces in Start.IngestHost. The agent sends IngestPreamble, then RFC 4571 framed
 // RTP packets (2-byte big-endian length + RTP packet).
 package protocol
 
@@ -91,12 +92,15 @@ func Encode(msgType string, msg any) ([]byte, error) {
 // ---- agent -> server ----
 
 type Hello struct {
-	ProtocolVersion int      `json:"protocol_version"`
-	DeviceID        string   `json:"device_id"`
-	Key             string   `json:"key"`
-	AgentVersion    string   `json:"agent_version"`
-	Hardware        Hardware `json:"hardware"`
-	Cameras         []Camera `json:"cameras"`
+	ProtocolVersion int    `json:"protocol_version"`
+	DeviceID        string `json:"device_id"`
+	Key             string `json:"key"`
+	AgentVersion    string `json:"agent_version"`
+	// Platform is "<GOOS>/<GOARCH>" of the agent binary (e.g. "linux/arm64"),
+	// so the server can offer a matching update. Empty for old agents.
+	Platform string   `json:"platform,omitempty"`
+	Hardware Hardware `json:"hardware"`
+	Cameras  []Camera `json:"cameras"`
 }
 
 type Hardware struct {
@@ -162,6 +166,22 @@ type Welcome struct {
 	// ports with TLS and accept only a leaf certificate with this hash.
 	// Trust is anchored in the control connection (use wss://).
 	IngestCertSHA256 string `json:"ingest_cert_sha256,omitempty"`
+	// AgentUpdate, if set, is a newer (really: different) agent build for the
+	// platform the agent announced in Hello. See AgentUpdate.
+	AgentUpdate *AgentUpdate `json:"agent_update,omitempty"`
+}
+
+// AgentUpdate announces the agent binary the server wants the agent to run.
+// The agent downloads it from Path (relative to the server's HTTP base URL,
+// authenticated with the device key as bearer token), verifies Size and SHA256
+// (announced over the control channel, so trust is anchored there: use
+// wss://), checks that the binary reports Version, and restarts into it once
+// no stream is running.
+type AgentUpdate struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"` // lowercase hex
+	Size    int64  `json:"size"`
+	Path    string `json:"path"` // e.g. "/agent/binary/linux-arm64"
 }
 
 type Start struct {
@@ -170,6 +190,11 @@ type Start struct {
 	Port      int     `json:"port"`
 	Token     string  `json:"token"`
 	Profile   Profile `json:"profile"`
+	// IngestHost, if set, is the host (name or IP) the agent must open the
+	// ingest connection to, instead of the host of its server_url. It lets
+	// the control channel use a stable load-balanced name while the media
+	// goes straight to the node that runs this server. Empty = server_url host.
+	IngestHost string `json:"ingest_host,omitempty"`
 }
 
 // Profile is the server's request; the agent picks the closest supported

@@ -94,6 +94,8 @@ func (s *Server) startSessionLocked(c *camera) error {
 		Port:      port,
 		Token:     sess.token,
 		Profile:   prof,
+
+		IngestHost: s.cfg.Ingest.PublicHost,
 	})
 	return nil
 }
